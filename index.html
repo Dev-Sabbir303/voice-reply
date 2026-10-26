@@ -103,6 +103,7 @@ input[type=range]{width:100%;accent-color:var(--gold)}
       <div class="stat"><strong id="stTime">০:০০</strong><span>শোনার সময়</span></div>
     </div>
     <div class="err" id="err"></div>
+    <p class="note" style="text-align:center">শোনার সময় স্ক্রিন চালু রাখুন ও ফোন লক করবেন না। প্রথমবার মাইক্রোফোনের অনুমতি চাইবে।</p>
   </section>
 
   <section class="panel" id="p-sound">
@@ -129,25 +130,12 @@ input[type=range]{width:100%;accent-color:var(--gold)}
     </div>
   </section>
 
-  <section class="panel" id="p-set">
-    <div class="glass">
-      <h2>সেটিং</h2>
-      <label class="s">সংবেদনশীলতা: <b id="sensV"></b> (বেশি হলে আস্তে কথাও ধরবে)</label>
-      <input type="range" id="sens" min="1" max="100">
-      <label class="s">কথা কতক্ষণ চললে বাজবে: <b id="durV"></b> সেকেন্ড</label>
-      <input type="range" id="dur" min="1" max="20">
-      <label class="s">একবার বাজার পর অপেক্ষা: <b id="coolV"></b> সেকেন্ড</label>
-      <input type="range" id="cool" min="1" max="60">
-      <p class="note">শোনার সময় স্ক্রিন চালু রাখুন ও ফোন লক করবেন না। প্রথমবার মাইক্রোফোনের অনুমতি চাইবে।</p>
-    </div>
-  </section>
 </div>
 
 <nav class="tabs" role="tablist">
   <button class="tab" role="tab" data-p="listen" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>শোনা</button>
   <button class="tab" role="tab" data-p="sound" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2"/></svg>সাউন্ড</button>
   <button class="tab" role="tab" data-p="clips" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>রেকর্ড</button>
-  <button class="tab" role="tab" data-p="set" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>সেটিং</button>
 </nav>
 <div class="toast" id="toast"></div>
 
@@ -174,14 +162,10 @@ input[type=range]{width:100%;accent-color:var(--gold)}
   /* ---------- settings ---------- */
   var cfg={sens:55,dur:4,cool:10,rec:true};
   try{var sv=JSON.parse(localStorage.getItem('vr-cfg')||'null');if(sv)cfg=Object.assign(cfg,sv)}catch(e){}
+  cfg.dur=4;cfg.cool=10;
   function saveCfg(){try{localStorage.setItem('vr-cfg',JSON.stringify(cfg))}catch(e){}}
   function threshold(){return Math.max(0.03,0.4-(cfg.sens/100)*0.37)}
-  function syncCfg(){
-    $('sens').value=cfg.sens;$('dur').value=cfg.dur;$('cool').value=cfg.cool;
-    $('sensV').textContent=bn(cfg.sens);$('durV').textContent=bn(cfg.dur);$('coolV').textContent=bn(cfg.cool);
-    $('thr').style.left=(threshold()*100)+'%';
-  }
-  ['sens','dur','cool'].forEach(function(k){$(k).addEventListener('input',function(){cfg[k]=+this.value;syncCfg();saveCfg()})});
+  function syncCfg(){$('thr').style.left=(threshold()*100)+'%'}
   var mt=$('meter');
   function dragMeter(e){
     var r=mt.getBoundingClientRect(),f=Math.min(0.4,Math.max(0.03,(e.clientX-r.left)/r.width));
@@ -205,9 +189,20 @@ input[type=range]{width:100%;accent-color:var(--gold)}
   function dbAll(){return openDB().then(function(db){return new Promise(function(res){var q=db.transaction('clips').objectStore('clips').getAll();q.onsuccess=function(){res(q.result||[])};q.onerror=function(){res([])}})}).catch(function(){return[]})}
 
   /* ---------- your sound ---------- */
+  var pctx=null;
+  function boost(a){
+    try{
+      pctx=pctx||new (window.AudioContext||window.webkitAudioContext)();
+      var src=pctx.createMediaElementSource(a),gn=pctx.createGain(),lim=pctx.createDynamicsCompressor();
+      gn.gain.value=10;
+      lim.threshold.value=-6;lim.knee.value=0;lim.ratio.value=20;lim.attack.value=0.003;lim.release.value=0.1;
+      src.connect(gn);gn.connect(lim);lim.connect(pctx.destination);
+    }catch(e){}
+  }
+  function wakeAudio(){if(pctx&&pctx.state==='suspended')pctx.resume()}
   function useBlob(b,label){
     blob=b;if(urlCur)URL.revokeObjectURL(urlCur);
-    urlCur=URL.createObjectURL(b);audioEl=new Audio(urlCur);
+    urlCur=URL.createObjectURL(b);audioEl=new Audio(urlCur);boost(audioEl);
     var p=$('preview');p.src=urlCur;p.hidden=false;
     $('soundInfo').textContent=label;$('testBtn').disabled=false;
     var c=$('chip');c.textContent='সাউন্ড তৈরি আছে';c.classList.add('ok');
@@ -233,7 +228,7 @@ input[type=range]{width:100%;accent-color:var(--gold)}
   });
   $('upBtn').addEventListener('click',function(){$('file').click()});
   $('file').addEventListener('change',function(){var f=this.files[0];if(!f)return;useBlob(f,'ফাইল: '+f.name);saveBlob(f);toast('সাউন্ড সেভ হয়েছে')});
-  $('testBtn').addEventListener('click',function(){if(audioEl){audioEl.currentTime=0;audioEl.play()}});
+  $('testBtn').addEventListener('click',function(){wakeAudio();if(audioEl){audioEl.currentTime=0;audioEl.play()}});
 
   /* ---------- visitor clips ---------- */
   var clips=[],urls=[],clipRec=null,clipChunks=null,clipT0=0,clipP0=0,lastLoud=0,voiced=0,armed=false;
@@ -295,7 +290,7 @@ input[type=range]{width:100%;accent-color:var(--gold)}
   function start(){
     if(!audioEl){toast('আগে একটি সাউন্ড দিন');var o=$('orb');o.classList.add('shake');setTimeout(function(){o.classList.remove('shake')},400);setTimeout(function(){go('sound')},450);return}
     setErr('');
-    navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true}}).then(function(st){
+    (wakeAudio(),navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true}})).then(function(st){
       stream=st;actx=new (window.AudioContext||window.webkitAudioContext)();
       var src=actx.createMediaStreamSource(st);an=actx.createAnalyser();an.fftSize=1024;src.connect(an);
       audioEl.muted=true;audioEl.play().then(function(){audioEl.pause();audioEl.currentTime=0;audioEl.muted=false}).catch(function(){audioEl.muted=false});
